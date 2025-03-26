@@ -1,3 +1,4 @@
 - App Structure : MVVM
 - UI : UIKIT + Swiftui
 - Caching the data
+- Clean Architcture 
