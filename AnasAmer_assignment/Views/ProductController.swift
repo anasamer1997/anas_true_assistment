@@ -1,4 +1,5 @@
 import UIKit
+import SwiftUI
 
 enum LayoutStyle {
     case grid
@@ -26,7 +27,7 @@ class ProductsViewController: UIViewController {
         
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         collectionView.backgroundColor = .systemGroupedBackground
-        collectionView.collectionViewLayout = createLayout(layout: layoutStyle)
+        collectionView.register(ProductCollectionViewCell.self, forCellWithReuseIdentifier: ProductCollectionViewCell.reuseIdentifier)
         collectionView.dataSource = self
         collectionView.delegate = self
         
@@ -72,15 +73,6 @@ class ProductsViewController: UIViewController {
         }
     }
     
-    func createLayout(layout :LayoutStyle) -> UICollectionViewCompositionalLayout {
-        if layout == .list{
-            return createPlitesMainCVLayout()
-            
-        }else{
-            return createProductCVLayout()
-        }
-        
-    }
     
     private func initProductList() {
         viewModel.onStateUpdate = {[weak self] value in
@@ -114,27 +106,20 @@ class ProductsViewController: UIViewController {
         }
         
     }
-    private func createPlitesMainCVLayout() -> UICollectionViewCompositionalLayout {
-        let item = CompositionalLayout.createItem(width: .fractionalWidth(1), height: .fractionalHeight(1),spacing: NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-        let Group = CompositionalLayout.createGroup(alignment: .vertical, width: .fractionalWidth(1), height: .absolute(160), item: item, count: 1)
-        let section = CompositionalLayout.craeteSection(group: Group, scrollingBehavor: .none, groupSpcaing: 10, contentPaddint: NSDirectionalEdgeInsets(top: 0, leading: 10, bottom: 0, trailing: 10))
-        return UICollectionViewCompositionalLayout(section: section)
-    }
-    
-    
-    private func createProductCVLayout() -> UICollectionViewCompositionalLayout {
-        let item = CompositionalLayout.createItem(width: .fractionalWidth(1), height: .fractionalHeight(1),spacing: NSDirectionalEdgeInsets(top: 0, leading: 5, bottom: 0, trailing: 5))
-        let Group = CompositionalLayout.createGroup(alignment: .horizontal, width: .fractionalWidth(1), height: .absolute(200), item: item, count: 2)
-        let section = CompositionalLayout.craeteSection(group: Group, scrollingBehavor: .none, groupSpcaing: 15, contentPaddint: NSDirectionalEdgeInsets(top: 0, leading: 5, bottom: 0, trailing: 5))
-        return UICollectionViewCompositionalLayout(section: section)
-    }
-    
+
     @objc private func toggleLayout() {
         layoutStyle = layoutStyle == .list ? .grid : .list
         let buttonImage = layoutStyle == .list ? UIImage(systemName: "square.grid.2x2") : UIImage(systemName: "list.bullet")
         layoutButton.image = buttonImage
-        collectionView.setCollectionViewLayout(createLayout(layout: layoutStyle), animated: true)
         
+        UIView.transition(with: collectionView,
+                          duration: 0.3,
+                          options: .transitionCrossDissolve,
+                          animations: {
+            self.collectionView.collectionViewLayout.invalidateLayout()
+            self.collectionView.reloadData()
+        },
+                          completion: nil)
     }
     deinit {
         // Clean up observers
@@ -150,33 +135,42 @@ extension ProductsViewController: UICollectionViewDataSource {
     
     
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
-        if layoutStyle == .list {
-            guard let cell = collectionView.dequeueReusableCell(
-                withReuseIdentifier: ProductRowCell.reuseIdentifier,
-                for: indexPath
-            ) as? ProductRowCell else {
-                return UICollectionViewCell()
-            }
-            
-            let product = viewModel.products[indexPath.item]
-            cell.configure(with: product)
-            return cell
-        }else{
-            guard let cell = collectionView.dequeueReusableCell(
-                withReuseIdentifier: ProductGridCell.reuseIdentifier,
-                for: indexPath
-            ) as? ProductGridCell else {
-                return UICollectionViewCell()
-            }
-            let product = viewModel.products[indexPath.item]
-            cell.configure(with: product)
-            return cell
-        }
+        let cell = collectionView.dequeueReusableCell(
+            withReuseIdentifier: ProductCollectionViewCell.reuseIdentifier,
+            for: indexPath
+        ) as! ProductCollectionViewCell
+        
+        let product = viewModel.product(at: indexPath.item)
+        cell.configure(with: product, style: layoutStyle)
+        
+        return cell
+
     }
 }
 
 extension ProductsViewController: UICollectionViewDelegateFlowLayout {
+    func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
+        let padding: CGFloat = 16
+        let collectionViewSize = collectionView.frame.size.width - padding * 2
+        
+        switch layoutStyle {
+        case .grid:
+            let itemWidth = (collectionViewSize - padding) / 2
+            return CGSize(width: itemWidth, height: itemWidth + 80) // Adjust height as needed
+        case .list:
+            return CGSize(width: collectionViewSize, height: 100) // Adjust height as needed
+        }
+    }
     
+    func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, insetForSectionAt section: Int) -> UIEdgeInsets {
+        return UIEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+    }
+    func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumLineSpacingForSectionAt section: Int) -> CGFloat {
+        return 16
+    }
+    func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumInteritemSpacingForSectionAt section: Int) -> CGFloat {
+         return 16
+     }
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
         if indexPath.row == viewModel.numberOfProducts - 1 {
             loadingIndicator.startAnimating()
@@ -188,5 +182,48 @@ extension ProductsViewController: UICollectionViewDelegateFlowLayout {
         let product = viewModel.product(at: indexPath.item)
         let detailVC = ProductDetailViewController(product: product)
         navigationController?.pushViewController(detailVC, animated: true)
+    }
+}
+
+
+class ProductCollectionViewCell: UICollectionViewCell {
+    static let reuseIdentifier = "ProductCollectionViewCell"
+    
+    private var hostingController: UIHostingController<AnyView>?
+    
+    func configure(with product: Product, style: LayoutStyle) {
+        // Remove any existing hosting controller
+        hostingController?.view.removeFromSuperview()
+        
+        // Create the appropriate SwiftUI view based on style
+        let rootView: AnyView
+        switch style {
+        case .grid:
+            rootView = AnyView(ProductGridCell(product: product))
+        case .list:
+            rootView = AnyView(ProductListCell(product: product))
+        }
+        
+        // Create and configure the hosting controller
+        let hostingController = UIHostingController(rootView: rootView)
+        hostingController.view.backgroundColor = .clear
+        
+        // Add the hosting controller's view to the cell
+        contentView.addSubview(hostingController.view)
+        hostingController.view.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            hostingController.view.topAnchor.constraint(equalTo: contentView.topAnchor),
+            hostingController.view.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            hostingController.view.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            hostingController.view.trailingAnchor.constraint(equalTo: contentView.trailingAnchor)
+        ])
+        
+        self.hostingController = hostingController
+    }
+    
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        hostingController?.view.removeFromSuperview()
+        hostingController = nil
     }
 }
